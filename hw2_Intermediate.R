@@ -103,22 +103,32 @@ for(i in 1:length(x)) {
 }
 y
 
-if (nrow(iris_sp) > 0) {
-    # then loop from 1 to number of rows in iris species
-    for(k in 1:nrow(iris_sp)) {
-        # x becomes sum of each column (traits), then is reset to 0 for 
-        # new trait.
-        x <- x + iris_sp[k, j]
-        # y is number of rows/sample size.
-        y <- y + 1
         
 # 6. Modify your for loop so that if the sum is greater than 10 the value of y 
 # is set to NA.
+x <- 1:10
+y <- NA
+for(i in 1:length(x)) {  
+    y[i] <- sum(x[1]:x[i], na.rm = TRUE) 
+      if (y[i] > 10) {
+            y[i] <- NA
+    }
+}
+y
 
 # 7. Place your for loop into a function that accepts as its argument any vector
 # of arbitrary length and it will return y.
-        
-        
-        #how many fib numbers would you like the function to return?
+
+calc_cum_sum <- function(x) {
+for(i in 1:length(x)) {  
+    y[i] <- sum(x[1]:x[i], na.rm = TRUE) 
+    if (y[i] > 10) {
+        y[i] <- NA
+    }
+}
+y
+}
+
+calc_cum_sum(1:27)
 
        

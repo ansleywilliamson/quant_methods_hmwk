@@ -1,1 +1,2 @@
-# quant_methods_hmwk
+# Homework for my quantitative methods class will be shared via this git.
+

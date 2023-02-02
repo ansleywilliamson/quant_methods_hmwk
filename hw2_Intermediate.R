@@ -103,6 +103,8 @@ for(i in 1:length(x)) {
 }
 y
 
+#another way to solve...
+sapply(1:length(x), function(i) sum(x[1:i]))
         
 # 6. Modify your for loop so that if the sum is greater than 10 the value of y 
 # is set to NA.
@@ -130,5 +132,4 @@ y
 }
 
 calc_cum_sum(1:27)
-
        

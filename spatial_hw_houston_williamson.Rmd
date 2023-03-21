@@ -1,0 +1,205 @@
+---
+title: "spatial_hw"
+author: "Hannah Houston and Ansley Williamson"
+date: '2023-02-28'
+output: html_document
+---
+
+## Spatial Modeling Assignment
+
+```{r}
+library(vegan)
+library(nlme)
+library(gstat)
+
+data(BCI)
+## UTM Coordinates (in metres)
+BCI_xy = data.frame(x = rep(seq(625754, 626654, by=100), each=5), 
+                    y = rep(seq(1011569,  1011969, by=100), len=50))
+```
+
+1) Examine if there is evidence of spatial dependence in a rare and a common
+species in the BCI tree dataset
+
+```{r}
+# look at species ranks based upon number of occurrences
+abundance <- sort(colSums(BCI > 0), dec = T)
+abundance
+hist(abundance, mainlab= "Species Abundance Distribution")
+#common species will be Tetragastris.panamensis (count is at 50) and rare species will be Inga.umbellifera (count is at 12)
+
+#calculate Euclidean distances and plot
+rare_dist <- dist(BCI$Inga.umbellifera, method = "euclidean")
+common_dist <- dist(BCI$Tetragastris.panamensis, method = "euclidean")
+xy_dist <- dist(BCI_xy)
+
+max_dist <- max(xy_dist) / 2
+
+#make a plot to look at spatial signal
+plot(xy_dist, common_dist, main = "Spatial Signal between UTM Coordinates and a Common Species")
+abline(lm(common_dist ~ xy_dist), lwd=3, col='cyan')
+lines(lowess(xy_dist, common_dist), lwd=3, col='red')
+abline(v = max_dist, col='red', lwd=3, lty=2)
+
+plot(xy_dist, rare_dist, main = "Spatial Signal between UTM Coordinates and a Rare Species")
+abline(lm(rare_dist ~ xy_dist), lwd=3, col='blue')
+lines(lowess(xy_dist, rare_dist), lwd=3, col='pink')
+abline(v = max_dist, col='pink', lwd=3, lty=2)
+
+# compute correlation
+obs_cor_com_rare <- cor(xy_dist, rare_dist)
+obs_cor_com_rare #this is 0.0345
+#this shows a weak correlation close to 0, suggests a random spatial signal. Still not sold so I will check with permutations
+
+obs_cor_common <- cor(xy_dist, common_dist)
+obs_cor_common #this is 0.076
+#this shows a weak correlation close to 0, suggests a random spatial signal. Still not sold so I will check with permutations
+
+#carry out mantel test for permutations, does 999 automatically, develops a null distribution of correlation values
+rare_mantel <- mantel(xy_dist, rare_dist)
+rare_mantel
+#not significant, shows a random spatial signal 
+
+common_mantel <- mantel(xy_dist, common_dist)
+common_mantel
+#not significant, shows a random spatial signal
+ 
+```
+2) Build two generalized linear models to predict the abundance of the species
+*Drypetes standleyi* using the abundance of other tree species in the study site.
+Specifically examine the following species as predictor variables:
+
+```{r}
+sp_ids = c("Cordia.lasiocalyx", "Hirtella.triandra",
+           "Picramnia.latifolia", "Quassia.amara",
+           "Tabernaemontana.arborea", "Trattinnickia.aspera", 
+           "Xylopia.macrantha")
+```
+
+With both models examine the spatial dependence of the residuals using the 
+function `Variogram`. Model the spatial dependence in the residuals using one
+of the error structures available. 
+
+
+* Model 1: only include a single species as a predictor variable
+```{r}
+#subset the data to include only the species and spatial location we are interested in 
+dry_sta <- subset(BCI, select = c("Drypetes.standleyi", "Cordia.lasiocalyx", "Hirtella.triandra",
+         "Picramnia.latifolia", "Quassia.amara", "Tabernaemontana.arborea" , "Trattinnickia.aspera", "Xylopia.macrantha"))
+bci_sub <- cbind(dry_sta, BCI_xy)
+
+#Making Model 1: only include a single species as a predictor variable 
+
+gls_onesp <- gls(Drypetes.standleyi ~ Cordia.lasiocalyx, data = bci_sub)
+summary(gls_onesp)
+#p-value is significant, absolute value of correlationis 0.87 (large), does seem to be autocorrelation between Drypetes standleyi and Cordia lasiocalyx
+
+#Use function Variogram for one species 
+library(gstat)
+vario_onesp <- Variogram(gls_onesp, form= ~ x + y, resType = 'response')
+# note the default of the Variogram function is to compute normalized residuals
+plot(vario_onesp)
+
+#compare to a plot we make on our own 
+res <- residuals(gls_onesp)
+res_var <- dist(res)^2 * 0.5
+plot(dist(bci_sub[, c('x', 'y')]), res_var)
+lines(lowess(dist(bci_sub[, c('x', 'y')]), res_var), col='red', lwd=2)
+abline(v = max_dist, col='red', lwd=3, lty=2)
+#Variogram and the variogram done by hand have a positive slope, the error of the model is showing positive autocorrelation
+
+#Model the spatial dependence in the residuals using one of the error structures available. 
+#try an AR1: most common model of spatial autocorrelation
+onesp_exp <- update(gls_onesp, corr=corExp(form=~ x + y))
+summary(onesp_exp)
+
+#make a variogram with that, examines fit of raw model residuals to error model
+plot(Variogram(onesp_exp, maxDist = max_dist)) #has a super tiny nugget (non 0 y intercept)
+
+#model does not fit error very well, try seeing if residuals should be normally distributed
+plot(Variogram(onesp_exp, resType='normalized', maxDist = max_dist))
+#that looks like residuals are normally distributed
+
+#address the nugget: exponential 
+onesp_exp_nug <- update(onesp_exp, corr=corExp(c(0.5, 0.1), form=~x + y, nugget=T))
+plot(Variogram(onesp_exp_nug, maxDist = max_dist)) #not a great fit
+plot(Variogram(onesp_exp_nug, resType='n', maxDist = max_dist)) #residuals look normally distributed
+
+#address the nugget: rational quadratic error model
+onesp_rat_nug<-update(onesp_exp, corr=corRatio(form=~x + y, nugget=T))
+plot(Variogram(onesp_rat_nug, maxDist = max_dist)) #still not a great fit
+plot(Variogram(onesp_rat_nug, resType='n', maxDist = max_dist)) #residuals look normally distributed
+```
+
+* Model 2: include all of the species as predictor variables
+```{r}
+#Making Model 2: include all species as predictor variables
+
+gls_prespec <- gls(Drypetes.standleyi ~ Cordia.lasiocalyx + Hirtella.triandra + Picramnia.latifolia + Quassia.amara + Tabernaemontana.arborea + Trattinnickia.aspera + Xylopia.macrantha, data = bci_sub)
+summary(gls_prespec)
+
+#use function Variogram for all predictor species 
+vario_prespec <- Variogram(gls_prespec, form= ~ x + y, resType = 'response')
+# note the default of the Variogram function is to compute normalized residuals
+plot(vario_prespec)
+
+#compare to a plot we make on our own 
+res <- residuals(gls_prespec)
+res_var <- dist(res)^2 * 0.5
+plot(dist(bci_sub[, c('x', 'y')]), res_var)
+lines(lowess(dist(bci_sub[, c('x', 'y')]), res_var), col='red', lwd=2)
+abline(v = max_dist, col='red', lwd=3, lty=2)
+
+#based on the variograms, autocorrelation signal seems to weaken (not as drastic in the variogram and extremely flat slope in the hand made version, indicates a random spatial pattern)
+
+#Model the spatial dependence in the residuals using one of the error structures available. 
+#try an AR1: most common model of spatial autocorrelation
+prespec_exp <- update(gls_prespec, corr=corExp(form= ~ x + y))
+summary(prespec_exp)
+
+#make a variogram with that, examines fit of raw model residuals to error model
+plot(Variogram(prespec_exp, maxDist = max_dist))
+
+#model does not fit error very well, try seeing if residuals should be normally distributed
+plot(Variogram(prespec_exp, resType='normalized', maxDist = max_dist))
+#that looks good
+
+#address the nugget: exponential 
+prespec_exp_nug <- update(prespec_exp, corr=corExp(c(0.5, 0.1), form=~x + y, nugget=T))
+plot(Variogram(prespec_exp_nug, maxDist = max_dist)) #still not a great fit
+plot(Variogram(prespec_exp_nug, resType='n', maxDist = max_dist)) #residuals look normally distributed, maybe a slight trend in them
+
+#address the nugget: rational quadratic error model
+prespec_rat_nug<-update(prespec_exp, corr=corRatio(form=~x + y, nugget=T))
+plot(Variogram(prespec_rat_nug, maxDist = max_dist)) #eh looks a little better than the other models byt still not a super great fit
+plot(Variogram(prespec_rat_nug, resType='n', maxDist = max_dist)) #residuals look normally distributed
+```
+
+
+* Did including the spatial error term have a large impact on the coefficients
+of the model? 
+
+In both models 1 (Drypetes.standleyi ~ Cordia.lasiocalyx) and 2 (Drypetes.standleyi ~ specified predictor species), including the spatial error term had a large impact on the coefficients of the model. However, the spatial model with a single predictor generally have stronger predictive power.
+
+* Did including the spatial error terms significantly improve model fit (use 
+function `anova` to carry out model comparison)?
+
+```{r}
+# use 'anova' to carry out model comparison of gls vs. lm for model 1
+anova(gls_onesp, onesp_exp, onesp_exp_nug, onesp_rat_nug, test=F)
+#spatial error term did improve model fit (lower AIC for spatial models than GLS)
+#Among the spatial models, rational quadratic error model with the nugget and AR1 fit the data equally well (AIC within 2 points) while the exponential model with the nugget did not provide as good of a fit, but still better than the GLS model.
+
+
+# use 'anova' to carry out model comparison of gls vs. lm for model 2
+anova(gls_prespec, prespec_exp, prespec_exp_nug, prespec_rat_nug, test=F)
+#including the spatial error term did improve model fit (based off of AIC interpretation, the lower the better the fit)
+#Among the spatial models, rational quadratic error model with the nugget and AR1 fit the data equally well (AIC within 2 points) while the exponential model with the nugget did not provide as good of a fit, but still better than the GLS model.
+
+```
+
+* Explain why you did or did not observe a difference in the influence of adding the spatial error term between the two models.
+
+When evaluating Model 1 (Drypetes.standleyi ~ Cordia.lasiocalyx) and Model 2 (Drypetes.standleyi ~ specified predictor species), adding the spatial error term did influence the model by improving model fit. This could be because the models that include the spatial error terms account for spatial and temporal autocorrelation while a standard GLS does not. Biologically, I would expect to see autocorrelation to some degree for tree species due to seed dispersal limitations, so using models like AR1 that account for such spatial trends will provide a better fit for the data.
+
+
